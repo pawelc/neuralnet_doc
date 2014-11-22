@@ -1,0 +1,200 @@
+% 
+\RequirePackage{amsmath}
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage[margin=0.3in]{geometry}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{hyperref}
+
+\usepackage{titlesec}% http://ctan.org/pkg/titlesec
+\titleformat{\section}%
+  [hang]% <shape>
+  {\normalfont\bfseries\Large}% <format>
+  {}% <label>
+  {0pt}% <sep>
+  {}% <before code>
+\renewcommand{\thesection}{}% Remove section references...
+\renewcommand{\thesubsection}{}%... from subsections
+
+\title{Module IV :
+Unsupervised learning: Hebbian and competitive learning}
+\author{Pawel Chilinski}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+\maketitle
+
+<<FUN,echo=F>>=
+require(ggplot2)
+require(scales)
+require(gridExtra)
+neuralNetProjectLocation = "/Users/pawelc/git/neuralnet"
+#Function to execute LUA via operating system, using torch interpreter 
+runLua <- function(script){
+  #has to remove some character produced by bash prompt
+  return(gsub("\\\033\\[0m(\\\t)?","",system(paste(". ~/.bash_profile ;th ",neuralNetProjectLocation,"/src/NeuralNet/exercises/",script,sep=""),intern = T))) 
+}
+
+prepareDataForPlottingfunction<-function(output){
+  parsed=t(sapply(output,function(row){as.numeric(unlist(strsplit(row, ",")))},USE.NAMES=F))
+  colnames(parsed)=c("out","class")
+  rownames(parsed)=1:nrow(parsed)
+  parsed<-as.data.frame(parsed)
+  parsed$class=sapply(parsed$class,function(class){
+      if(class == 1) return("Iris-setosa")                                    
+      else if(class == 2) return("Iris-versicolor") 
+      else if(class == 3) return("Iris-virginica")      
+    })
+  parsed$class<-as.factor(parsed$class) 
+  return(parsed)
+}	
+@
+
+Examples in this document can be found in the source bundle attached to this
+document (or on github repository: \url{https://github.com/pawelc/neuralnet/tree/master/src/NeuralNet/exercises/module4}) and can be run after
+installing torch7 machine learning library: \url{http://torch.ch/}.
+\\
+
+\subsection{Exercise 1} Implement simple Hebbian rule to perform clustering of the
+standard Iris Flower input data. Try with 3 clusters.
+\\
+
+I implemented the neural Hebbian learning with/without normalising weights after
+each sample,with/without normalising input data and run exercise in
+script neuralnet/src/NeuralNet/exercises/module4/ex1.lua. The script accepts
+various parameters to adjust training of the model. The output from the script
+is the output of the neuron on each example after training it with unsupervised Hebbian rule, together with the class given in
+ the iris dataset. I run it with different parameters to check how Hebbian
+ learning is affected by different modifications. 
+
+<<EX1_RUN,echo=T,cache=T>>=
+ex1Output <- runLua("module4/ex1.lua")
+ex1Output.normalizedInput <- runLua("module4/ex1.lua -i")
+ex1Output.normalizedInputAndWeights <- runLua("module4/ex1.lua -i -w")
+ex1Output.normalizedInputAndWeightsMoreTrainingEpochs <- runLua("module4/ex1.lua -i -w -e 1000")
+ex1Output.normalizedInputAndWeightsMoreTrainingEpochsBiggerLearningRate <- 
+  runLua("module4/ex1.lua -i -w -e 100 -l 0.9")
+@
+
+It looks that different settings haven't affected how Hebbian learning separates
+data into clusters.
+
+<<EX1_PARSE_OUT,echo=F,cache=T,dependson=EX1_RUN>>=		
+    ex1Output<-prepareDataForPlottingfunction(ex1Output)
+    ex1Output.normalizedInput<-prepareDataForPlottingfunction(ex1Output.normalizedInput)
+    ex1Output.normalizedInputAndWeights<-prepareDataForPlottingfunction(ex1Output.normalizedInputAndWeights)
+    ex1Output.normalizedInputAndWeightsMoreTrainingEpochs<-prepareDataForPlottingfunction(ex1Output.normalizedInputAndWeightsMoreTrainingEpochs)
+    ex1Output.normalizedInputAndWeightsMoreTrainingEpochsBiggerLearningRate<-prepareDataForPlottingfunction(ex1Output.normalizedInputAndWeightsMoreTrainingEpochsBiggerLearningRate)
+@
+
+We can show how projecting data on the first principal eigenvector reveals
+clusters in the data. The following figures show the points produced by the
+model against the true class, cluster around different values in 1D space.
+
+We can see also that increasing the learning rate from 0.1 to 0.9 caused
+different clustering for each class but still they are separated in the same
+manner.
+
+The simple Hebbian update rule without input and weight normalisation produces
+worse result than when we add normalisation to weights and input data. For
+instance the Iris-setosa and Iris-versicolor overlap after projection in
+the first plot and in the rest of cases they don't.
+
+<<EX1_FIG,fig=TRUE,echo=F,cache=F,height=10>>=
+p1<-ggplot(ex1Output)+aes(class,out,col=class)+geom_point(size=1)+xlab("true class")+ylab("component value")+ggtitle("Without weigh and input normalisation, learning rate 0.1") + 
+  theme(text = element_text(size=7))
+p2<-ggplot(ex1Output.normalizedInput)+aes(class,out,col=class)+geom_point(size=1)+xlab("true class")+ylab("component value")+ggtitle("Input normalised, learning rate 0.1") + 
+  theme(text = element_text(size=7))
+p3<-ggplot(ex1Output.normalizedInputAndWeights)+aes(class,out,col=class)+geom_point(size=1)+xlab("true class")+ylab("component value")+ggtitle("Input and weight normalised, learning rate 0.1") + 
+  theme(text = element_text(size=7))
+p4<-ggplot(ex1Output.normalizedInputAndWeightsMoreTrainingEpochs)+aes(class,out,col=class)+geom_point(size=1)+xlab("true class")+ylab("component value")+ggtitle("Input and weight normalised, 1000 training epochs, learning rate 0.1") + 
+  theme(text = element_text(size=7))
+p5<-ggplot(ex1Output.normalizedInputAndWeightsMoreTrainingEpochsBiggerLearningRate)+aes(class,out,col=class)+geom_point(size=1)+xlab("true class")+ylab("component value")+ggtitle("Input and weight normalised, 100 training epochs, learning rate 0.9") + 
+  theme(text = element_text(size=7))
+grid.arrange(p1, p2, p3, p4, p5, nrow = 5, ncol = 1)
+@
+
+\subsection{Exercise 2} Exercise 2. Implement Sejnowski's covariance rule to perform clustering of
+the standard Iris Flower input data. Compare results with the Exercise 1.
+
+I implemented the Sejnowski's covariance rule in script
+neuralnet/src/NeuralNet/exercises/module4/ex2.lua.
+
+<<EX2_RUN,echo=T,cache=T>>=
+ex2Output <- runLua("module4/ex2.lua")
+@
+<<EX2_PARSE_OUT,echo=F,cache=T,dependson=EX2_RUN>>=
+ex2Output<-prepareDataForPlottingfunction(ex2Output)
+@
+
+The output of the trained single neuron network is presented on the following
+figure. Outputs from the network are plotted against their true classes. We see
+that maximum principal component was selected in a similar way as in the case
+of the Hebbian algorithm output. This plot is closest to the Hebbian algorithm
+running on the normalised data which makes intuitive sense. 
+
+The Sejnowski's covariance rule produces better results that simple Hebbian
+update rule without weight and input normalisation. For instance the classes of
+Iris-setosa and Iris-versicolor do not overlap after projection by algorithm and
+in case of simple Hebbian without normalisation they overlap.
+
+<<EX2_FIG,fig=TRUE,echo=F,cache=F,height=3>>=
+ggplot(ex2Output)+aes(class,out,col=class)+geom_point(size=1)+xlab("true class")+ylab("component value")+ggtitle("Learning rate 0.1") + 
+  theme(text = element_text(size=7))
+@
+
+\subsection{Exercise 3} Derive Oja's learning rule (4.17) using (4.14) from the textbook.
+\\
+It looks it is already derived in the textbook in (4.15).
+
+\subsection{Exercise 4} Implement Oja's rule to perform 3-class clustering of the standard Iris Flower input data. Attach comparative analysis of the results.
+
+I implemented Oja's rule in script
+neuralnet/src/NeuralNet/exercises/module4/ex4.lua:
+<<EX4_RUN,echo=T,cache=T>>=
+ex4Output <- runLua("module4/ex4.lua")
+@
+<<EX4_PARSE_OUT,echo=F,cache=T,dependson=EX4_RUN>>=
+ex4Output<-prepareDataForPlottingfunction(ex4Output)
+@
+
+<<EX4_FIG,fig=TRUE,echo=F,cache=F,height=3>>=
+ggplot(ex4Output)+aes(class,out,col=class)+geom_point(size=1)+xlab("true class")+ylab("component value")+ggtitle("Learning rate 0.1") + 
+  theme(text = element_text(size=7))
+@
+It can be seen that separation of the clusters is not as good as Sejnowski's
+covariance rule but the values of first component are much smaller (because of implicit weigh normalisation).
+
+\subsection{Exercise 5} Implement competitive network with three nodes to
+perform 3-class clustering of the standard Iris Flower input data. Attach comparative
+analysis of the results.
+
+I implemented competitive network with three nodes in script
+neuralnet/src/NeuralNet/exercises/module4/ex5.lua:
+<<EX5_RUN,echo=T,cache=T>>=
+ex5Output <- runLua("module4/ex5.lua -i -e 10000 -l 0.01")
+@
+<<EX5_PARSE_OUT,echo=F,cache=T,dependson=EX5_RUN>>=
+ex5Output<-prepareDataForPlottingfunction(ex5Output)
+@
+
+After training I assign the input to the cluster by selecting the
+neuron with the biggest value. Each of 3 neurons represent one class. To show
+the assignment on the plot I draw on horizontal axis the true class and on
+vertical axis assigned neuron and the points are jittered so they do not
+overlap. 
+
+We can see the Iris-setosa was separated perfectly, the Iris-virginica
+is not perfectly assigned to one cluster and the Iris-versicolor is almost
+evenly split between 2 classes. This agree with previous experiments where also
+red points where separated in most cases to 2 visible separate clusters and
+green and blue points have overlapping region.
+
+<<EX5_FIG,fig=TRUE,echo=F,cache=F,height=3>>=
+ggplot(ex5Output)+aes(class,out,col=class)+geom_point(size=1,position = "jitter")+xlab("true class")+ylab("component value")+ggtitle("Learning rate 0.1") + 
+  theme(text = element_text(size=7))
+@
+
+\end{document}

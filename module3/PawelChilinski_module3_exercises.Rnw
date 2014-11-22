@@ -1,0 +1,178 @@
+% 
+\RequirePackage{amsmath}
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage[margin=0.3in]{geometry}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{hyperref}
+
+\usepackage{titlesec}% http://ctan.org/pkg/titlesec
+\titleformat{\section}%
+  [hang]% <shape>
+  {\normalfont\bfseries\Large}% <format>
+  {}% <label>
+  {0pt}% <sep>
+  {}% <before code>
+\renewcommand{\thesection}{}% Remove section references...
+\renewcommand{\thesubsection}{}%... from subsections
+
+\title{Module III :
+Multilayer Perceptron \& Feedforward Neural
+Networks: error backpropagation supervised learning}
+\author{Pawel Chilinski}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+\maketitle
+
+<<PERCEPTRON,echo=F>>=
+neuralNetProjectLocation = "/Users/pawelc/git/neuralnet"
+#Function to execute LUA via operating system, using torch interpreter 
+runLua <- function(script){
+  #has to remove some character produced by bash prompt
+  return(gsub("\\\033\\[0m(\\\t)?","",system(paste(". ~/.bash_profile ;th ",neuralNetProjectLocation,"/src/NeuralNet/exercises/",script,sep=""),intern = T))) 
+}
+@
+
+Examples in this document can be found in the source bundle attached to this
+document (or on github repository: \url{https://github.com/pawelc/neuralnet}) and can be run after
+installing torch7 machine learning library: \url{http://torch.ch/} (I use LUA
+programming language and efficient implementation of tensors from this library
+to implement neural networks algorithms implemented in my library). I used this
+library because currently it is havily used by Google DeepMind, Facebook so it
+is worth to learn it. It provides transparent usage of advanced numerical
+libraries like BLASS and JIT compilation to very efficient code which can
+execute on CPUs or GPUs. To run template (Rnw) for this document one has to set
+variable neuralNetProjectLocation.
+\\
+
+\subsection{Exercise 1} Implement a 2-layer perceptron network (2 neurons in the input
+layer + 1 output unit) together with its learning algorithm. Train the network
+on XOR problem.
+\\
+
+I implemented the neural network and the backpropagation algorithm to train
+network for this exercise.
+In this example I used required architecture with tanh activations where positive output
+from the output neuron means +1 and negative -1. The script training this
+network can be found in the source bundle
+src/NeuralNet/exercises/module3/ex1.lua. The script is documented. By running
+it:
+
+<<RUN_EX1_LUA,echo=T,cache=T>>=
+	ex1Output <- runLua("module3/ex1.lua")	
+@
+
+ we get following output (The last weight in each vector of weights for a given
+ neuron belong to the bias):
+<<SHOW_EX1_LUA,echo=T,cache=F>>=
+	ex1Output
+@
+
+The network fitted the data perfectly if assume the output bigger then 0 means 1
+and output smaller then 0 means -1.
+
+\subsection{Exercise 2} Derive function forms of derivatives for 3 activation functions:
+linear, unipolar logistic and hyperbolic tangent. Express the derivatives using output values $y_i^l$ rather than inputs or weights. This will speed up the
+subsequent computations.
+\\
+
+Linear:
+\begin{flalign*}
+& \varphi(v)=v \\
+& \varphi'(v)=1
+\end{flalign*}
+
+Unipolar logistic:
+\begin{flalign*}
+& \varphi(v)=\frac{1}{1+\exp(-v)} \\
+& \varphi'(v)=\frac{\exp(-v)}{(1+\exp(-v))^2}=\frac{\exp(-v)}{1+\exp(-v)}\times \frac{1}{1+\exp(-v)}=y\times (\frac{1+\exp(-v)}{1+\exp(-v)}-\frac{\exp(-v)}{1+exp(-v)})=y(1-y)
+\end{flalign*}
+
+hyperbolic tangent:
+\begin{flalign*}
+& \varphi(v)=\tanh(v)=\frac{\exp(x)-\exp(-x)}{\exp(x)+\exp(-x)} \\
+& \varphi'(v)=\frac{(\exp(x)+\exp(-x))(\exp(x)+\exp(-x))-(\exp(x)-\exp(-x))(\exp(x)-\exp(-x))}{(\exp(x)+\exp(-x))^2}=1-\tanh^2(v)=(1-y)(1+y)
+\end{flalign*}
+
+\subsection{Exercise 3} Implement 3-layer feed forward neural network with the
+back- propagation algorithm (two layers with hyperbolic tangent unit + output layer
+with linear activations). Train on Nonlinear Dynamic Plant benchmark.
+\\
+
+The script training this network can be found in the source bundle
+src/NeuralNet/exercises/module3/ex3.lua. The data is split for into cross
+validation data(10-fold cross validation used) and test data. Using 10-fold
+cross validation I select best hyper parameters which are in this case sizes of
+hidden layers. The search is done using complete grid search (please look at
+output of the script below). The best model selected by the grid search on
+10-fold cross validation is then assessed on the separate test data.
+
+Running the script:
+
+<<RUN_EX3_LUA,echo=T,cache=T>>=
+	ex3Output <- runLua("module3/ex3.lua")	
+@
+
+ we get following output:
+ 
+<<SHOW_EX3_LUA,echo=T,cache=F>>=
+	ex3Output
+@
+
+The cross validation procedure selected model with 5 and 9 layer sizes. As
+expected the test error is bigger then validation error.
+
+\subsection{Exercise 4} Implement exponential increasing of the learning rate, and per-
+form comparative analysis of the improvement on the dataset from Ex. 3.
+\\
+
+I again perform grid search but now also updating learning rate exponentially
+with different parameters. The output of the script shows all validated
+configurations and selected best model and its generalisation error on test
+data.
+
+Running the script:
+
+<<RUN_EX4_LUA,echo=T,cache=T>>=
+	ex4Output <- runLua("module3/ex4.lua")	
+@
+
+ we get following output:
+ 
+<<SHOW_EX4_LUA,echo=T,cache=F>>=
+	ex4Output
+@
+
+This procedure gave worse results in terms of RMSE test error possibly because
+of the wrongly selected range of hyperparameters. We see that for some values of
+hyper parameters the learning procedure experienced numerical overflow. Also the
+architecture of the network selected is different than the one selected in
+Exercise 3.
+
+\subsection{Exercise 5} Exercise 5. Equip the backpropagation method with momentum, and perform
+comparative analysis of the improvement on the dataset from Ex. 3.
+\\
+
+I again perform grid search but now also updating momentum rate 
+with different parameters. The output of the script shows all validated
+configurations and selected best model and its generalisation error on test
+data.
+
+Running the script:
+
+<<RUN_EX5_LUA,echo=T,cache=T>>=
+	ex5Output <- runLua("module3/ex5.lua")	
+@
+
+ we get following output:
+ 
+<<SHOW_EX5_LUA,echo=T,cache=F>>=
+	ex5Output
+@
+
+This procedure again selected different architecture, the build model has better
+validation error but worse test error.
+\end{document}

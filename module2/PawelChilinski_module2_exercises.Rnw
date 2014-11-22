@@ -1,0 +1,402 @@
+% 
+\RequirePackage{amsmath}
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage[margin=0.3in]{geometry}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{hyperref}
+
+\usepackage{titlesec}% http://ctan.org/pkg/titlesec
+\titleformat{\section}%
+  [hang]% <shape>
+  {\normalfont\bfseries\Large}% <format>
+  {}% <label>
+  {0pt}% <sep>
+  {}% <before code>
+\renewcommand{\thesection}{}% Remove section references...
+\renewcommand{\thesubsection}{}%... from subsections
+
+\title{Module 2 - Perceptron \& ADALINE: learning rules}
+\author{Pawel Chilinski}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+\maketitle
+
+The exercises have been implemented in R and document generated using sweave.
+
+\subsection{Exercise 1} Implement a single-unit perceptron together with its
+learning algorithm
+
+Function to compute classification error:
+<<CLASS_ERR_FUN,echo=T,cache=T>>=
+  classficationError<-function(fun,w,data){
+    sum(apply(data,1,function(row){
+            input<-row[-length(row)]
+            target<-row[length(row)]
+            target != fun(w,input)
+          }))/nrow(data)  
+  }  
+@
+
+<<PERCEPTRON,echo=T,cache=T>>=
+#Perceptron as a function of extended weight vector and extended input vector
+# w - extended weight vector
+# x - extended input vector
+perceptron<-function(w,x){
+  #return signum of the dot product between extended input vector and extended weight vector 
+  return(sign(sum(w*x))) 
+}
+#Function training perceptron
+# trainData - matrix with train example per row (as extended input) and appended label as last column
+trainPerceptron<-function(trainData,maxEpochs=-1,lerarningRateFun=function(epoch){0.01}){
+  #random weights
+  set.seed(1023)
+  startW=runif(ncol(trainData)-1,-0.5,0.5)
+  w=startW
+  classErrHist<-classficationError(perceptron,w,trainData)
+  #while we don't want to stop yet
+  misclassified<-T  
+  epoch<-1
+  while(misclassified & (epoch<maxEpochs | maxEpochs<0)){    
+    misclassified<-F
+    #permute training examples for this epoch
+  	permuation<-sample(nrow(trainData))
+  	for(i in permuation){
+      	#get input and its label for selected example
+    	input<-trainData[i,-ncol(trainData)]
+    	desiredOutput<-trainData[i,ncol(trainData)]
+      	#when misclassified
+    	if(perceptron(w,input) != desiredOutput){
+        	#update weights acording to perceptron rule.
+     		w=w+lerarningRateFun()*desiredOutput*input	   
+        	misclassified<-T
+      	}        
+    }
+    classErrHist<-c(classErrHist,classficationError(perceptron,w,trainData))
+    #print(paste("After epoch:",epoch,"w=",paste(w)))
+    epoch<-epoch+1
+  }
+  names(w)<-c("w0","w1","w2")
+  return(list(w=w,startW=startW,classErrHist=classErrHist))
+}
+@
+
+\subsection{Exercise 2} Implement a single ADALINE unit together with its Delta learning algorithm.
+
+<<ADALINE,echo=T,cache=T>>=
+#Ramp activation function for adeline classification
+ramp<-function(x){
+  if(x>-1 & x<1){
+    return(x)
+  }else{
+    return(sign(x))
+  }
+}
+#ADALINE as a function of extended weight vector and extended input vector
+# w - extended weight vector
+# x - extended input vector
+adaline<-function(w,x){
+  #return signum of the dot product between extended input vector and extended weight vector 
+  return(ramp(sum(w*x))) 
+}
+#computed RMSE for adaline model.
+# trainData - matrix with train example per row (as extended input) and target in the last column
+# w extended weights of the model
+rmseAdeline<-function(trainData,w){
+		  sqrt(sum(apply(trainData,1,function(row){
+          		input<-row[-length(row)]
+              	target<-row[length(row)]
+                (target - adaline(w,input))^2
+        	}))/nrow(trainData))
+}
+#Function training ADALINE using delta rule.
+# trainData - matrix with train example per row (as extended input) and target in the last column
+trainAdaline<-function(trainData,maxRmse,lerarningRateFun,maxEpochs=-1){
+  #random weights
+  set.seed(1024)
+  w=runif(ncol(trainData)-1,-0.5,0.5)
+  rmseHist<-c()
+  classErrHist<-classficationError(function(w,x){sign(adaline(w,x))},w,trainData)
+  startW=w
+  #while we don't want to stop yet  
+  epoch<-1
+  while(T){
+    #permute training examples for this epoch
+    permuation<-sample(nrow(trainData))
+    for(i in permuation){
+      #get input and its target for selected example
+      input<-trainData[i,-ncol(trainData)]
+      desiredOutput<-trainData[i,ncol(trainData)]
+      #compute epsilon
+      eps<-desiredOutput-adaline(w,input)
+      #delta rule
+      w<-w+lerarningRateFun(epoch)*eps*input
+    }
+    #check of RMSE decreased sufficiently
+    rmse <- rmseAdeline(trainData,w)
+    rmseHist<-c(rmseHist,rmse)
+    classErrHist<-c(classErrHist,classficationError(function(w,x){sign(adaline(w,x))},w,trainData))
+    #print(paste("rmse: ",currentRmse))
+    if(rmse<maxRmse || (maxEpochs >0 && epoch >= maxEpochs)){
+      names(w)<-c("w0","w1","w2")
+      return(list(w=w,startW=startW,rmseHist=rmseHist,classErrHist=classErrHist))
+    }
+    epoch<-epoch+1
+  }
+}
+@
+
+\subsection{Exercise 3} Perform a training of the perceptron on the OR-type function
+approximation (linearly separable).
+
+First define a function that allows to create points partitioned into 2
+separable classes: 
+
+<<EX3_POINTS_OR,echo=T,cache=T>>=
+#generates 2D data with 2 classes linearly separable. 1st column is the extension of input, 
+#2nd column is x coordinate, 3rd column is y coordinate, 4th column is class
+#points - number of points
+orFunctionGenerateData<-function(points){
+  #generate matrix with data
+  data<-matrix(c(rep(1,points),runif(2*points,-10,10),rep(1,points)),ncol = 4)
+  #generate line separating 2 set of points
+  set.seed(1025)
+  w0<-runif(1,-5,-5)
+  w1<-runif(1,-100,100)
+  w2<-runif(1,-100,100)
+  data<-t(apply(data,1,function(row){
+      val <- w0*row[1]+w1*row[2]+w2*row[3]
+      if(val>=0){
+      	c(row[1:3],1)  
+      }else{
+        c(row[1:3],-1)
+      }
+    }))
+  colnames(data)<-c("ex","x","y","label")
+  return(list(data=data,w=c(w0,w1,w2)))
+}
+
+@
+
+Generate points:
+
+<<EX3_GENERATE_POINTS,echo=T,cache=T,dependson=EX3_POINTS_OR>>=
+separableTrainingData<-orFunctionGenerateData(100)
+@
+
+and show them on a plot with the true separating line:
+
+<<EX3_FIG_TR_POINTS,fig=TRUE,echo=F,dependson=EX3_GENERATE_POINTS>>=
+library(ggplot2)
+library(scales)
+separableTrainingData.df<-as.data.frame(separableTrainingData$data)
+separableTrainingData.df$label<-as.factor(separableTrainingData.df$label)
+realW<-separableTrainingData$w
+ggplot(separableTrainingData.df)+aes(x,y,col=label)+geom_point(size=3)+xlab("x")+ylab("y")+geom_abline(intercept = -realW[1]/realW[3], slope = -realW[2]/realW[3])
+@
+
+generated weights:
+<<EX3_DATA_SHOW_W,echo=T,cache=F>>=
+separableTrainingData$w
+@
+
+Train the perceptron:
+<<EX3_TRAIN_PERC,echo=T,cache=T,dependson=EX3_GENERATE_POINTS;PERCEPTRON>>=
+	trainedPerceptron <- trainPerceptron(separableTrainingData$data,maxEpochs = 10)
+	trainedW <- trainedPerceptron$w  	
+@
+
+Show trained weights:
+<<EX3_TRAIN_SHOW_W,echo=T,cache=F>>=
+trainedW
+@
+
+Random initialisation of algorithm and trained weights as a line:
+
+<<EX3_FIG_WEIGHTS,fig=TRUE,echo=F,dependson=EX3_TRAIN_PERC>>=
+ggplot(separableTrainingData.df)+aes(x,y,col=label)+geom_point(size=3)+xlab("x")+ylab("y") +
+  geom_abline(intercept = -trainedW[1]/trainedW[3], slope = -trainedW[2]/trainedW[3],colour="black") +  
+  geom_abline(intercept = -trainedPerceptron$startW[1]/trainedPerceptron$startW[3], slope = -trainedPerceptron$startW[2]/trainedPerceptron$startW[3], colour="grey")
+@
+
+The perceptron model fitted the data perfectly, of course the final solution is
+different from the data generating model (original line separating classes).
+
+\subsection{Exercise 4} Perform a training of the ADALINE on the OR-type function
+approximation (linearly separable). Try 3 different learning rates. Is it worth 
+to implement exponentially decreasing learning rate in this case?
+
+Reusing data generated for the previous exercise to train ADALINE:
+<<EX4_TRAIN_ADALINE,echo=T,cache=T,dependson=EX3_GENERATE_POINTS;ADALINE>>=
+	trainedAdaline<-trainAdaline(separableTrainingData$data,1,function(epoch){0.1})
+  	trainedWAdaline<-trainedAdaline$w
+@
+
+Show trained weights:
+
+<<EX4_TRAIN_SHOW_W,echo=T,cache=F>>=
+trainedWAdaline
+@
+
+Random initialisation of algorithm and trained weights as a line:
+
+<<EX4_FIG_WEIGHTS,fig=TRUE,echo=F,dependson=EX3_TRAIN_PERC>>=
+ggplot(separableTrainingData.df)+aes(x,y,col=label)+geom_point(size=3)+xlab("x")+ylab("y")+
+  geom_abline(intercept = -trainedWAdaline[1]/trainedWAdaline[3], slope = -trainedWAdaline[2]/trainedWAdaline[3],colour="black") +
+  geom_abline(intercept = -trainedAdaline$startW[1]/trainedAdaline$startW[3], slope = -trainedAdaline$startW[2]/trainedAdaline$startW[3], colour="grey")
+@
+
+Trying training ADALINE with different weights:
+<<EX4_TRAIN_ADALINE_DIFF_RATES,echo=T,cache=T,dependson=EX3_GENERATE_POINTS;ADALINE>>=
+  trainedAdalineLR1<-trainAdaline(separableTrainingData$data,0.1,function(epoch){0.1})  
+  trainedAdalineLR2<-trainAdaline(separableTrainingData$data,0.1,function(epoch){0.03})  
+  trainedAdalineLR3<-trainAdaline(separableTrainingData$data,0.1,function(epoch){0.04})
+@
+
+Showing history of RMSE during learning for different learning rates:
+
+<<EX4_FIG_RMSE_HIST,fig=TRUE,echo=F,dependson=EX4_TRAIN_ADALINE_DIFF_RATES>>=
+rmseDiffRates <- rbind(data.frame(epoch=1:length(trainedAdalineLR1$rmseHist),rmse=trainedAdalineLR1$rmseHist,lr="0.1"),	
+  data.frame(epoch=1:length(trainedAdalineLR2$rmseHist),rmse=trainedAdalineLR2$rmseHist,lr="0.03"),
+	data.frame(epoch=1:length(trainedAdalineLR3$rmseHist),rmse=trainedAdalineLR3$rmseHist,lr="0.04"))
+
+ggplot(rmseDiffRates)+aes(epoch,rmse,colour=lr)+geom_line()+xlab("epoch")+ylab("rmse")
+@
+
+Trying those learning rates with exponential decay:
+
+<<EX4_TRAIN_ADALINE_EXP_DECR_LR,echo=T,cache=T,dependson=EX3_GENERATE_POINTS;ADALINE>>=
+  trainedAdalineLR1ExpDecr<-trainAdaline(separableTrainingData$data,0.1,function(epoch){(0.1)*exp(-0.1*(epoch-1))} ,maxEpochs = 200)
+  trainedAdalineLR2ExpDecr<-trainAdaline(separableTrainingData$data,0.1,function(epoch){(0.03)*exp(-0.01*(epoch-1))},maxEpochs = 200)
+  trainedAdalineLR3ExpDecr<-trainAdaline(separableTrainingData$data,0.1,function(epoch){(0.04)*exp(-0.01*(epoch-1))},maxEpochs = 200)
+@
+
+Showing history of RMSE during learning for different learning rates with
+exponential decay applied:
+
+<<EX4_FIG_RMSE_HIST_EXP_DEC,fig=TRUE,echo=F,dependson=EX4_TRAIN_ADALINE_DIFF_RATES>>=
+rmseDiffRatesExpDec <- rbind(data.frame(epoch=1:length(trainedAdalineLR1ExpDecr$rmseHist),rmse=trainedAdalineLR1ExpDecr$rmseHist,lr="0.1"),	
+  data.frame(epoch=1:length(trainedAdalineLR2ExpDecr$rmseHist),rmse=trainedAdalineLR2ExpDecr$rmseHist,lr="0.03"),
+	data.frame(epoch=1:length(trainedAdalineLR3ExpDecr$rmseHist),rmse=trainedAdalineLR3ExpDecr$rmseHist,lr="0.04"))
+
+ggplot(rmseDiffRatesExpDec)+aes(epoch,rmse,colour=lr)+geom_line()+xlab("epoch")+ylab("rmse")
+@
+
+It looks that one has to be careful with setting up hyperparameters that control
+the exponential decay because they can make learning last longer. It looks that
+in case of linearly separatable data there is no point in using exponential decay.
+
+\subsection{Exercise 5} Perform comparative tests of the perceptron and ADALINE on
+the XOR-type function approximation (not linearly separable). Stop criterion: after a reasonable number of epochs.
+
+Function to generate XOR-type data:
+
+<<EX5_POINTS_XOR,echo=T,cache=T>>=
+#generates 2D data with 2 classes not linearly separable. 1st column is the extension of input, 
+#2nd column is x coordinate, 3rd column is y coordinate, 4th column is class
+#points - number of points
+xorFunctionGenerateData<-function(points){
+  #generate matrix with data
+  data<-matrix(c(rep(1,points),runif(2*points,-10,10),rep(1,points)),ncol = 4)
+  #generate 2 lines separating 2 set of points
+  #set.seed(1025)
+  l1w0<-0
+    #runif(1,-5,-5)
+  l1w1<-1
+    #runif(1,-100,100)
+  l1w2<-1
+    #runif(1,-100,100)
+  
+  l2w0<-0
+    #runif(1,-5,-5)
+  l2w1<--1
+    #runif(1,-100,100)
+  l2w2<-1
+    #runif(1,-100,100)
+  
+  data<-t(apply(data,1,function(row){
+      val1 <- l1w0*row[1]+l1w1*row[2]+l1w2*row[3]
+      val2 <- l2w0*row[1]+l2w1*row[2]+l2w2*row[3]
+      if((val1>=0 && val2 <= 0) || (val1 <= 0 && val2>=0)){
+      	c(row[1:3],1)  
+      }else{
+        c(row[1:3],-1)
+      }
+    }))
+  colnames(data)<-c("ex","x","y","label")
+  return(list(data=data,l1w=c(l1w0,l1w1,l1w2),l2w=c(l2w0,l2w1,l2w2)))
+}
+
+@
+
+Generate points:
+
+<<EX5_GENERATE_POINTS,echo=T,cache=T,dependson=EX5_POINTS_XOR>>=
+notSeparableTrainingData<-xorFunctionGenerateData(1000)
+@
+
+and show them on a plot with the true separating lines:
+
+<<EX5_FIG_TR_POINTS,fig=TRUE,echo=F,dependson=EX5_GENERATE_POINTS>>=
+notSeparableTrainingData.df<-as.data.frame(notSeparableTrainingData$data)
+nsReall1W<-notSeparableTrainingData$l1w
+nsReall2W<-notSeparableTrainingData$l2w
+ggplot(notSeparableTrainingData.df)+aes(x,y,col=factor(label))+geom_point(size=3)+xlab("x")+ylab("y") +
+  geom_abline(intercept = -nsReall1W[1]/nsReall1W[3], slope = -nsReall1W[2]/nsReall1W[3]) +
+  geom_abline(intercept = -nsReall2W[1]/nsReall2W[3], slope = -nsReall2W[2]/nsReall2W[3])
+@
+
+Run perceptron 
+
+<<EX5_TRAIN_PER,echo=T,cache=T,dependson=EX5_GENERATE_POINTS;PERCEPTRON>>=  
+  trainedPerNotSep<-
+    trainPerceptron(notSeparableTrainingData$data,lerarningRateFun = function(epoch){0.01}, 
+      maxEpochs = 1000)
+@
+
+and adaline learning:
+
+<<EX5_TRAIN_AD,echo=T,cache=T,dependson=EX5_GENERATE_POINTS;ADALINE>>=
+  trainedAdalineNotSep<-
+    trainAdaline(notSeparableTrainingData$data,maxRmse =  0.1,lerarningRateFun = function(epoch){0.01},
+      maxEpochs = 1000)  
+@
+
+Trained weights as a line (where solid line is adaline and dashed line is
+perceptron):
+
+<<EX5_FIG_WEIGHTS,fig=TRUE,echo=F,dependson=EX5_TRAIN>>=
+ggplot(notSeparableTrainingData.df)+aes(x,y,col=factor(label))+geom_point(size=3)+xlab("x")+ylab("y")+
+  geom_abline(intercept = -trainedAdalineNotSep$w[1]/trainedAdalineNotSep$w[3], slope = -trainedAdalineNotSep$w[2]/trainedAdalineNotSep$w[3],linetype=1)+
+  geom_abline(intercept = -trainedPerNotSep$w[1]/trainedPerNotSep$w[3], slope = -trainedPerNotSep$w[2]/trainedPerNotSep$w[3],linetype=2)+
+	scale_linetype_manual(values=c(1,2), name="", labels=c("Adaline",   "Perceptron"))
+@
+
+Classification errors for adaline and perceptron:
+<<EX5_CLASS_ERR,echo=T,dependson=EX5_TRAIN_AD;EX5_TRAIN_PER;EX5_GENERATE_POINTS;CLASS_ERR_FUN>>=
+	classficationError(function(w,x){sign(adaline(w,x))},trainedAdalineNotSep$w,notSeparableTrainingData$data)
+  	classficationError(perceptron,trainedAdalineNotSep$w,notSeparableTrainingData$data)
+@
+
+We see that two models selected different solution (possibly because of the
+different starting vectors but ended-up with the same classification error)
+
+Showing history of classification error during learning for both algorithms:
+
+<<EX5_FIG_CL_ERR_HIST,fig=TRUE,echo=F,dependson=EX5_TRAIN_AD;EX5_TRAIN_PER;EX5_GENERATE_POINTS>>=
+classError <- rbind(
+  data.frame(epoch=1:length(trainedAdalineNotSep$classErrHist),classErr=trainedAdalineNotSep$classErrHist,alg="Adaline"),	
+  data.frame(epoch=1:length(trainedPerNotSep$classErrHist),classErr=trainedPerNotSep$classErrHist,alg="Perceptron"))
+
+ggplot(classError)+aes(epoch,classErr,colour=alg)+geom_line()+xlab("epoch")+ylab("Classification Error")
+@
+
+The convergence also looks similar. 
+
+Here I am not checking how well models can genralize but only how well they
+can fit the training data.
+
+\end{document}

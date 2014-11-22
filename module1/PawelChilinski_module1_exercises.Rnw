@@ -1,0 +1,64 @@
+% 
+\RequirePackage{amsmath}
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage[margin=0.3in]{geometry}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{hyperref}
+
+\usepackage{titlesec}% http://ctan.org/pkg/titlesec
+\titleformat{\section}%
+  [hang]% <shape>
+  {\normalfont\bfseries\Large}% <format>
+  {}% <label>
+  {0pt}% <sep>
+  {}% <before code>
+\renewcommand{\thesection}{}% Remove section references...
+\renewcommand{\thesubsection}{}%... from subsections
+
+\title{Lecture 1: Introduction to biological and artificial neural networks}
+\author{Pawel Chilinski}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+\maketitle
+
+The exercises have been implemented in R and document generated using sweave.
+
+\subsection{Exercise 1} Try to implement an artificial neuron in any selected programming language. Use the
+schema given in the lecture.
+
+Implementation of the neuron:
+
+<<NEURON,echo=T>>=
+#Neuron as a function of weight vector and input vector
+# w - weight vector
+# x - input vector
+neuron<-function(w,x,theta=0.5){
+  #return step function of dot product between weight and input vectors
+  return(as.numeric(sum(w*x)>=theta))
+}
+@
+
+Carry out simulations for five different values set of weights. For each values set give
+three sets of inputs. Write experiments results in the report together with theoretically
+calculated values:
+<<NEURON_SIM,echo=T,>>=
+	set.seed(123)
+	#For 5 different weight vectors
+	for(i in 1:5){
+    	#generate randomly vectors:
+    	w<-runif(3,-100,100)
+      	#For each weight generate 3 inputs
+      	for(j in 1:3){
+        	input<-runif(3,-100,100)
+          	#compute neuron value
+    		writeLines(paste("For neuron with weights:",paste(w,collapse = ","),
+            "and\ninputs:",paste(input,collapse=","),"the output is: ", neuron(w,input),"\n")) 
+      	}
+	}
+@
+
+\end{document}
