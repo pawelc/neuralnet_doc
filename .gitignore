@@ -1,1 +1,10 @@
 /.project
+**/cacheSweaveStorage*
+**/*concordan*
+**/*aux
+**/*dvi
+**/*log
+**/*out
+**/*pdf
+**/*tex
+**/*.cache/
