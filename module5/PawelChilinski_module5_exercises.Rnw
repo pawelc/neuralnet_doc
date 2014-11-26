@@ -1,0 +1,422 @@
+% 
+\RequirePackage{amsmath}
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage[margin=0.3in]{geometry}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{hyperref}
+
+\usepackage{titlesec}% http://ctan.org/pkg/titlesec
+\titleformat{\section}%
+  [hang]% <shape>
+  {\normalfont\bfseries\Large}% <format>
+  {}% <label>
+  {0pt}% <sep>
+  {}% <before code>
+\renewcommand{\thesection}{}% Remove section references...
+\renewcommand{\thesubsection}{}%... from subsections
+
+\title{Module V: Self-Organizing Feature Maps}
+\author{Pawel Chilinski}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+\maketitle
+
+<<FUN,echo=F>>=
+require(ggplot2)
+require(scales)
+require(gridExtra)
+neuralNetProjectLocation = "/home/pawel/git/neuralnet"
+#Function to execute LUA via operating system, using torch interpreter 
+runLua <- function(script,data = NULL){
+	dataCsv=""
+  #if there is data frame to pass to lua then built a CSV string so it can be passed as stdin
+  if(!is.null(data)){
+		rm(dataCsv)
+		dataCsv.con <- textConnection("dataCsv", "w")
+		write.csv(data, dataCsv.con,row.names=F)
+		close(dataCsv.con)
+		dataCsv  <- paste(dataCsv[2:length(dataCsv)],collapse = "\n")
+  }
+  #has to remove some character produced by bash prompt
+  result <- gsub("\\\033\\[0m(\\\t)?","",system(paste("echo -e '",dataCsv,"' | th ",neuralNetProjectLocation,"/src/NeuralNet/exercises/",script,sep=""),intern = T))
+  
+  #translate result to data frame    
+  return(read.csv(text=result))  
+}
+
+#function that draws lattice topology
+addLatticeTopology <- function(latticeData, graph){
+	maxD1 <- max(latticeData$d1)
+	maxD2 <- max(latticeData$d2)
+	
+	getNeighbour<-function(d1,d2){
+		return(latticeData[latticeData$d1==d1 & latticeData$d2==d2,])
+	}
+	
+	for(d1 in 1:maxD1){
+		for(d2 in 1:maxD2){
+			row<-latticeData[latticeData$d1==d1 & latticeData$d2==d2,]
+			
+			neighbour <- getNeighbour(d1-1,d2)
+			if(nrow(neighbour) != 0){
+				graph <- graph + geom_path(aes(w1,w2,colour="red"),data=rbind(row,neighbour))	
+			}
+			
+			neighbour <- getNeighbour(d1+1,d2)
+			if(nrow(neighbour) != 0){
+				graph <- graph + geom_path(aes(w1,w2,colour="red"),data=rbind(row,neighbour))	
+			}
+			
+			neighbour <- getNeighbour(d1,d2-1)
+			if(nrow(neighbour) != 0){
+				graph <- graph + geom_path(aes(w1,w2,colour="red"),data=rbind(row,neighbour))	
+			}
+			
+			neighbour <- getNeighbour(d1,d2+1)
+			if(nrow(neighbour) != 0){
+				graph <- graph + geom_path(aes(w1,w2,colour="red"),data=rbind(row,neighbour))	
+			}
+		}
+	}
+	return(graph)
+}
+
+#Go through all the points and find closest neuron for each
+clusterPoints<-function(somOutput,indata,labels){
+	#norm of the vector
+	vecNorm<-function(row1){
+		sqrt(sum(row1^2))
+	}
+	
+	#find closest neuron
+	closestNeuron<-function(row){
+		distances<-apply(as.matrix(somOutput[,c("w1","w2","w3","w4")])-as.numeric(row),1,vecNorm)
+		minIdx<-which.min(distances)
+		c(somOutput[minIdx,c("d1","d2")],dist=distances[minIdx])
+	}
+	
+	lis<-apply(indata,1,closestNeuron)
+	res<-cbind(do.call("rbind", lapply(lis, data.frame, stringsAsFactors = FALSE)),labels)
+	colnames(res)<-c("d1","d2","dist","lab")
+	return(res)
+}
+@
+
+Examples in this document can be found in the source bundle attached to this
+document (or on github repository: \url{https://github.com/pawelc/neuralnet/tree/master/src/NeuralNet/exercises/module5}) and can be run after
+installing torch7 machine learning library: \url{http://torch.ch/}.
+\\
+
+\subsection{Exercise 1} Implement the two-inputs SOM with 1D output lattice and test
+it on a square grid with random samples.
+\\
+
+I implemented this exercise in lua script:
+/neuralnet/src/NeuralNet/exercises/module5/trainLattice.lua.
+
+Generating input data composed of 100 random points:
+<<EX1_RANDOM_DATA,echo=T,cache=T>>=
+set.seed(123)
+data<-data.frame(X=runif(100,-1,1),Y=runif(100,-1,1))
+@
+\\
+
+Computing weights of output neurons in 1D lattice for different number of
+learning iterations (epochs), effective width of the topological neighborhood of 1, learning rate of
+0.1, time decay of 1000:
+<<EX1_RUN_EPOCHS,echo=T,cache=T,dependson=EX1_RANDOM_DATA>>=
+set.seed(123)
+ex1Output1 <- runLua("module5/trainLattice.lua -w -e 0 -s 1 -l 0.1 -t 1000 -n '10,1'",data)
+ex1Output2 <- runLua("module5/trainLattice.lua -w -e 10 -s 1 -l 0.1 -t 1000 -n '10,1'",data)
+ex1Output3 <- runLua("module5/trainLattice.lua -w -e 100 -s 1 -l 0.1 -t 1000 -n '10,1'",data)
+ex1Output4 <- runLua("module5/trainLattice.lua -w -e 1000 -s 1 -l 0.1 -t 1000 -n '10,1'",data)
+ex1Output5 <- runLua("module5/trainLattice.lua -w -e 10000 -s 1 -l 0.1 -t 1000 -n '10,1'",data)
+@
+
+Showing learnt weights of 10 neurons after different number of learning
+iterations (epochs):
+
+<<EX1_FIG_EPOCHS,fig=TRUE,echo=F,cache=F,height=10,width=10>>=
+p1<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1Output1)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1Output1)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("Input data and weight vectors before learning") + 
+		theme(text = element_text(size=7))
+p2<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1Output2)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1Output2)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("Input data and weight vectors after 10 epochs of learning") + 
+		theme(text = element_text(size=7))
+p3<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1Output3)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1Output3)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("Input data and weight vectors after 100 epochs of learning") + 
+		theme(text = element_text(size=7))
+p4<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1Output4)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1Output4)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("Input data and weight vectors after 1000 epochs of learning") + 
+		theme(text = element_text(size=7))
+p5<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1Output5)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1Output5)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("Input data and weight vectors after 10000 epochs of learning") + 
+		theme(text = element_text(size=7))
+grid.arrange(p1, p2, p3, p4, p5, nrow = 3, ncol = 2)
+@
+
+Computing weights of output neurons in 1D lattice for different number of
+output neurons, effective width of the topological neighborhood of 1,
+learning rate of 0.1, time decay of 1000, epochs of 1000:
+
+<<EX1_RUN_NEURONS,echo=T,cache=T,dependson=EX1_RANDOM_DATA>>=
+set.seed(123)
+ex1OutputNeuron1 <- runLua("module5/trainLattice.lua -w -e 1000 -s 1 -l 0.1 -t 1000 -n '5,1'",data)
+ex1OutputNeuron2 <- runLua("module5/trainLattice.lua -w -e 1000 -s 1 -l 0.1 -t 1000 -n '10,1'",data)
+ex1OutputNeuron3 <- runLua("module5/trainLattice.lua -w -e 1000 -s 1 -l 0.1 -t 1000 -n '20,1'",data)
+ex1OutputNeuron4 <- runLua("module5/trainLattice.lua -w -e 1000 -s 1 -l 0.1 -t 1000 -n '30,1'",data)
+ex1OutputNeuron5 <- runLua("module5/trainLattice.lua -w -e 1000 -s 1 -l 0.1 -t 1000 -n '40,1'",data)
+ex1OutputNeuron6 <- runLua("module5/trainLattice.lua -w -e 1000 -s 1 -l 0.1 -t 1000 -n '50,1'",data)
+@
+
+Showing learnt weights of 1D lattice with different number of neurons:
+
+<<EX1_FIG_NEURONS,fig=TRUE,echo=F,cache=F,height=10,width=10>>=
+p1<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1OutputNeuron1)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1OutputNeuron1)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("5 neurons") + 
+		theme(text = element_text(size=7))
+p2<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1OutputNeuron2)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1OutputNeuron2)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("10 neurons") + 
+		theme(text = element_text(size=7))
+p3<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1OutputNeuron3)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1OutputNeuron3)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("20 neurons") + 
+		theme(text = element_text(size=7))
+p4<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1OutputNeuron4)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1OutputNeuron4)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("30 neurons") + 
+		theme(text = element_text(size=7))
+p5<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1OutputNeuron5)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1OutputNeuron5)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("40 neurons") + 
+		theme(text = element_text(size=7))
+p6<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex1OutputNeuron6)+
+		geom_path(aes(w1,w2,colour="red"),data=ex1OutputNeuron6)+
+		xlab("X,w1")+ylab("Y,w2")+ggtitle("50 neurons") + 
+		theme(text = element_text(size=7))
+grid.arrange(p1, p2, p3, p4, p5, p6, nrow = 3, ncol = 2)
+@
+
+We can see on plots topological ordering of neurons' weights. The weight vectors
+start from small random weights and during the training they allign along the
+path that fits the input data.
+
+\subsection{Exercise 2} Implement the two-inputs SOM with 2D output lattice and test
+it on a square grid with random samples.
+\\
+
+I implemented this exercise in the same script as exerice 1:
+/neuralnet/src/NeuralNet/exercises/module5/trainLattice.lua. It is invoked with different
+parameters to construct different size of 2D output lattice (parameter -n "5,5")
+
+Reusing data generated in the previous example and computing weights of output
+neurons in 2D lattice for different number of learning iterations (epochs),
+effective width of the topological neighborhood of 1, learning rate of 0.1, time decay of 1000:
+
+<<EX2_RUN_EPOCHS,echo=T,cache=T,dependson=EX1_RANDOM_DATA>>=
+set.seed(123)
+ex2Output1Epochs <- runLua("module5/trainLattice.lua -w -e 0 -s 1 -l 0.1 -t 1000 -n '5,5'",data)
+ex2Output2Epochs <- runLua("module5/trainLattice.lua -w -e 10 -s 1 -l 0.1 -t 1000 -n '5,5'",data)
+ex2Output3Epochs <- runLua("module5/trainLattice.lua -w -e 100 -s 1 -l 0.1 -t 1000 -n '5,5'",data)
+ex2Output4Epochs <- runLua("module5/trainLattice.lua -w -e 1000 -s 1 -l 0.1 -t 1000 -n '5,5'",data)
+ex2Output5Epochs <- runLua("module5/trainLattice.lua -w -e 10000 -s 1 -l 0.1 -t 1000 -n '5,5'",data)
+@
+
+Showing input data and weight vectors with topollogy of the
+2D lattice:
+
+<<EX2_FIG_EPOCHS,fig=TRUE,echo=F,cache=F,height=10,width=10>>=
+p1<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex2Output1Epochs)
+p1<-addLatticeTopology(ex2Output1Epochs,p1)
+p1<-p1+xlab("X,w1")+ylab("Y,w2")+ggtitle("Input data and weight vectors before learning") + 
+		theme(text = element_text(size=7))
+
+p2<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex2Output2Epochs)
+p2<-addLatticeTopology(ex2Output2Epochs,p2)
+p2<-p2+xlab("X,w1")+ylab("Y,w2")+ggtitle("Input data and weight vectors after 10 epochs of learning") + 
+		theme(text = element_text(size=7))
+
+p3<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex2Output3Epochs)
+p3<-addLatticeTopology(ex2Output3Epochs,p3)
+p3<-p3+xlab("X,w1")+ylab("Y,w2")+ggtitle("Input data and weight vectors after 100 epochs of learning") + 
+		theme(text = element_text(size=7))
+
+p4<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex2Output4Epochs)
+p4<-addLatticeTopology(ex2Output4Epochs,p4)
+p4<-p4+xlab("X,w1")+ylab("Y,w2")+ggtitle("Input data and weight vectors after 1000 epochs of learning") + 
+		theme(text = element_text(size=7))
+
+p5<-ggplot(data)+geom_point(aes(X,Y),size=2,colour="black")+geom_point(aes(w1,w2,colour="red"),size=3,data=ex2Output5Epochs)
+p5<-addLatticeTopology(ex2Output5Epochs,p5)
+p5<-p5+xlab("X,w1")+ylab("Y,w2")+ggtitle("Input data and weight vectors after 10000 epochs of learning") + 
+		theme(text = element_text(size=7))
+
+grid.arrange(p1, p2, p3, p4, p5, nrow = 3, ncol = 2)
+@
+
+We can see that before learning the 2D lattice doesn't have regular structure
+but then starts to form the net. It looks that for 10 and 100 epochs net is
+evently spread but for more epochs it starts to fit data more precisely, we can
+suppose that the model overfits.
+
+\subsection{Exercise 3}  Basing on the previous exercise, extend the number of inputs to
+4 and modify the learning rate and the forgetting factor to be exponentially
+decreasing. Perform cluster analysis on the standard Iris Flower dataset.
+Try a 3-by-3 output lattice.
+\\
+
+Import iris data:
+<<EX3_IRIS_DATA,echo=T,cache=T>>=
+iris<-read.table("iris.data.txt",header=F,sep=",",colClasses = c("numeric","numeric","numeric","numeric","factor"))
+@
+
+Running SOM learning algorithm with parameters:
+\begin{itemize}
+  \item Input dimension (-d) 4
+  \item Return weights (-w)
+  \item Number of epochs (-e), trying with 10,100,1000
+  \item effective width of the topological neighborhood of 1 (-s)
+  \item learning rate of 0.1 (-l)
+  \item time decay of 1000 (-t)
+  \item lattice size 3x3(-n)
+  \iten $\tau_2$ decay time in the learning rate and forgetting factor (-r)
+\end{itemize}
+
+<<EX3_RUN,echo=T,cache=T,dependson=EX3_IRIS_DATA>>=
+set.seed(123)
+ex3Output1 <- runLua("module5/trainLattice.lua -d 4 -w -e 10 -s 1 -l 0.1 -t 1000 -n '3,3' -r 100",iris[,c(1,2,3,4)])
+ex3Output1DataClustered<-clusterPoints(ex3Output1,iris[,1:4],iris[,5])
+
+ex3Output2 <- runLua("module5/trainLattice.lua -d 4 -w -e 100 -s 1 -l 0.1 -t 1000 -n '3,3' -r 100",iris[,c(1,2,3,4)])
+ex3Output2DataClustered<-clusterPoints(ex3Output2,iris[,1:4],iris[,5])
+
+ex3Output3 <- runLua("module5/trainLattice.lua -d 4 -w -e 1000 -s 1 -l 0.1 -t 1000 -n '3,3' -r 100",iris[,c(1,2,3,4)])
+ex3Output3DataClustered<-clusterPoints(ex3Output3,iris[,1:4],iris[,5])
+@
+
+Next we show topological map of the neurons and depict which data points are
+the closest to which neuron (in terms of Euclidian distance). For each datapoint
+we find the closest neuron and place this data point next to it. Also each data
+point is coloured using true label so we can assess the quality of clustering:
+
+<<EX3_FIG,fig=TRUE,echo=F,cache=F,height=10,width=10>>=
+p1<-ggplot()+geom_point(aes(d1,d2),size=3,data=ex3Output1)
+p1<-p1+xlab("x")+ylab("y")+ggtitle("Lattice and clusterred data after 10 epochs") + 
+		theme(text = element_text(size=7)) + geom_point(aes(d1,d2,colour=lab),position=position_jitter(width=0.2,height=0.2),data=ex3Output1DataClustered)
+
+p2<-ggplot()+geom_point(aes(d1,d2),size=3,data=ex3Output2)
+p2<-p2+xlab("x")+ylab("y")+ggtitle("Lattice and clusterred data after 100 epochs") + 
+		theme(text = element_text(size=7)) + geom_point(aes(d1,d2,colour=lab),position=position_jitter(width=0.2,height=0.2),data=ex3Output2DataClustered)
+
+p3<-ggplot()+geom_point(aes(d1,d2),size=3,data=ex3Output3)
+p3<-p3+xlab("x")+ylab("y")+ggtitle("Lattice and clusterred data after 1000 epochs") + 
+		theme(text = element_text(size=7)) + geom_point(aes(d1,d2,colour=lab),position=position_jitter(width=0.2,height=0.2),data=ex3Output3DataClustered)
+
+grid.arrange(p1, p2, p3, nrow = 3, ncol = 1)
+@
+
+We can see that after 1000 epochs majority of the data points from each class is
+assigned to seperate neuron.
+
+\subsection{Exercise 4}  Basing on the previous exercise, use larger output lattices such
+that their deformations occur frequently. Try to avoid these deformations
+with different neighborhood sizes {1,2,3}.
+\\
+
+Learning SOM models for different sizes of output lattices of 5x5, 10x10 and
+20x20 for 1000 epochs on iris data set: 
+
+<<EX4_RUN,echo=T,cache=T,dependson=EX3_IRIS_DATA>>=
+set.seed(123)
+ex4Output1 <- runLua("module5/trainLattice.lua -d 4 -w -e 1000 -s 1 -l 0.1 -t 1000 -n '5,5' -r 100",iris[,c(1,2,3,4)])
+ex4Output1DataClustered<-clusterPoints(ex4Output1,iris[,1:4],iris[,5])
+
+ex4Output2 <- runLua("module5/trainLattice.lua -d 4 -w -e 1000 -s 1 -l 0.1 -t 1000 -n '10,10' -r 100",iris[,c(1,2,3,4)])
+ex4Output2DataClustered<-clusterPoints(ex4Output2,iris[,1:4],iris[,5])
+
+ex4Output3 <- runLua("module5/trainLattice.lua -d 4 -w -e 1000 -s 1 -l 0.1 -t 1000 -n '20,20' -r 100",iris[,c(1,2,3,4)])
+ex4Output3DataClustered<-clusterPoints(ex4Output3,iris[,1:4],iris[,5])
+@
+
+Showing the result of clusterring data to this models (the same type of plot as
+in Exercise 3):
+
+<<EX4_FIG,fig=TRUE,echo=F,cache=F,height=10,width=10>>=
+p1<-ggplot()+geom_point(aes(d1,d2),size=3,data=ex4Output1)
+p1<-p1+xlab("x")+ylab("y")+ggtitle("5x5 lattice and clusterred data") + 
+		theme(text = element_text(size=7)) + geom_point(aes(d1,d2,colour=lab),position=position_jitter(width=0.2,height=0.2),data=ex4Output1DataClustered)
+
+p2<-ggplot()+geom_point(aes(d1,d2),size=3,data=ex4Output2)
+p2<-p2+xlab("x")+ylab("y")+ggtitle("10x10 lattice and clusterred data") + 
+		theme(text = element_text(size=7)) + geom_point(aes(d1,d2,colour=lab),position=position_jitter(width=0.2,height=0.2),data=ex4Output2DataClustered)
+
+p3<-ggplot()+geom_point(aes(d1,d2),size=3,data=ex4Output3)
+p3<-p3+xlab("x")+ylab("y")+ggtitle("20x20 lattice and clusterred data") + 
+		theme(text = element_text(size=7)) + geom_point(aes(d1,d2,colour=lab),position=position_jitter(width=0.2,height=0.2),data=ex4Output3DataClustered)
+
+grid.arrange(p1, p2, p3, nrow = 3, ncol = 1)
+@
+
+\subsection{Exercise 5}  Perform comparative analysis of the Gaussian neighborhood
+function with the Mexican Hat function (implemented by any of the two formulae).
+\\
+
+Learning SOM models for different sizes of output lattices of 5x5, 10x10 and
+20x20 for 1000 epochs on iris data set, using Mexican Hat function: 
+
+<<EX5_RUN,echo=T,cache=T,dependson=EX3_IRIS_DATA>>=
+set.seed(123)
+ex5Output1 <- runLua("module5/trainLattice.lua -d 4 -w -e 1000 -s 1 -l 0.1 -t 1000 -n '5,5' -r 100 -o '{name=\"mex_hat\",beta=0.1,alpha=0.2}'",iris[,c(1,2,3,4)])
+ex5Output1DataClustered<-clusterPoints(ex5Output1,iris[,1:4],iris[,5])
+
+ex5Output2 <- runLua("module5/trainLattice.lua -d 4 -w -e 1000 -s 1 -l 0.1 -t 1000 -n '10,10' -r 100 -o '{name=\"mex_hat\",beta=0.1,alpha=0.2}'",iris[,c(1,2,3,4)])
+ex5Output2DataClustered<-clusterPoints(ex5Output2,iris[,1:4],iris[,5])
+
+ex5Output3 <- runLua("module5/trainLattice.lua -d 4 -w -e 1000 -s 1 -l 0.1 -t 1000 -n '20,20' -r 100 -o '{name=\"mex_hat\",beta=0.1,alpha=0.2}'",iris[,c(1,2,3,4)])
+ex5Output3DataClustered<-clusterPoints(ex5Output3,iris[,1:4],iris[,5])
+@
+
+Showing the result of clusterring data to this models (the same type of plot as
+in Exercise 3):
+
+<<EX5_FIG,fig=TRUE,echo=F,cache=F,height=10,width=10>>=
+p1<-ggplot()+geom_point(aes(d1,d2),size=3,data=ex5Output1)
+p1<-p1+xlab("x")+ylab("y")+ggtitle("5x5 lattice and clusterred data") + 
+		theme(text = element_text(size=7)) + geom_point(aes(d1,d2,colour=lab),position=position_jitter(width=0.2,height=0.2),data=ex5Output1DataClustered)
+
+p2<-ggplot()+geom_point(aes(d1,d2),size=3,data=ex5Output2)
+p2<-p2+xlab("x")+ylab("y")+ggtitle("10x10 lattice and clusterred data") + 
+		theme(text = element_text(size=7)) + geom_point(aes(d1,d2,colour=lab),position=position_jitter(width=0.2,height=0.2),data=ex5Output2DataClustered)
+
+p3<-ggplot()+geom_point(aes(d1,d2),size=3,data=ex5Output3)
+p3<-p3+xlab("x")+ylab("y")+ggtitle("20x20 lattice and clusterred data") + 
+		theme(text = element_text(size=7)) + geom_point(aes(d1,d2,colour=lab),position=position_jitter(width=0.2,height=0.2),data=ex5Output3DataClustered)
+
+grid.arrange(p1, p2, p3, nrow = 3, ncol = 1)
+@
+
+Showing quantization error for models learned with Gaussian neighborhood
+function and with the Mexican Hat function for different sizes of lattices: 
+
+<<EX5_FIG_QUANT_ERR,fig=TRUE,echo=F,cache=F,height=10,width=10>>=
+quantErrGauss=data.frame(lattice=c("5x5","10x10","20x20"),error=c(mean(ex4Output1DataClustered$dist),mean(ex4Output2DataClustered$dist),mean(ex4Output3DataClustered$dist)))
+quantErrMex=data.frame(lattice=c("5x5","10x10","20x20"),error=c(mean(ex5Output1DataClustered$dist),mean(ex5Output2DataClustered$dist),mean(ex5Output3DataClustered$dist)))
+ggplot()+
+		geom_point(aes(factor(lattice,levels = c("5x5", "10x10", "20x20")),error,colour="blue"),size=3,data=quantErrGauss)+
+		geom_point(aes(factor(lattice,levels = c("5x5", "10x10", "20x20")),error,colour="red"),size=3,data=quantErrMex)+
+		xlab("Lattic Size")+ylab("Quantization Error")+
+		scale_colour_discrete(name="Neighborhood\nFunction",
+				labels=c("Gaussian", "Mexican Hat"))
+@
+\end{document}

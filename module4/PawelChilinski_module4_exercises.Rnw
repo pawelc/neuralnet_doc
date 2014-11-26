@@ -30,7 +30,7 @@ Unsupervised learning: Hebbian and competitive learning}
 require(ggplot2)
 require(scales)
 require(gridExtra)
-neuralNetProjectLocation = "/Users/pawelc/git/neuralnet"
+neuralNetProjectLocation = "/home/pawel/git/neuralnet"
 #Function to execute LUA via operating system, using torch interpreter 
 runLua <- function(script){
   #has to remove some character produced by bash prompt
