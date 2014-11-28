@@ -1,0 +1,50 @@
+% 
+\RequirePackage{amsmath}
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage[margin=0.3in]{geometry}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{hyperref}
+
+\usepackage{titlesec}% http://ctan.org/pkg/titlesec
+\titleformat{\section}%
+  [hang]% <shape>
+  {\normalfont\bfseries\Large}% <format>
+  {}% <label>
+  {0pt}% <sep>
+  {}% <before code>
+\renewcommand{\thesection}{}% Remove section references...
+\renewcommand{\thesubsection}{}%... from subsections
+
+\title{Module VI: Evolutionary algorithms}
+\author{Pawel Chilinski}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+\maketitle
+
+<<FUN,cache=FALSE,echo=F>>=
+require(ggplot2)
+require(scales)
+require(gridExtra)
+@
+
+Examples in this document are implemented in R.
+\\
+
+\subsection{Exercise} Using of any program language, write evolutionary strategies for fitting of function to
+experimental data set. The format of function is a polynomial: $y(x)=ax^2+bx+c$. Find
+parameters: a, b, c.
+Try to implement strategies: (1+1), ($\mi+\lambda$), ($\mi,\lambda$).
+Find and describe differences in efficiency. Try to find, what is a reason of
+differences in algorithms operating.
+\\
+
+Implementation of (1+1) strategy:
+<<ONE_PLUS_ONE_STRATEGY,cache=TRUE,echo=TRUE>>=
+
+@
+\\
+\end{document}

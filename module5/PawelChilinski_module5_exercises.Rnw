@@ -25,7 +25,7 @@
 \SweaveOpts{concordance=TRUE}
 \maketitle
 
-<<FUN,echo=F>>=
+<<FUN,cache=FALSE,echo=F>>=
 require(ggplot2)
 require(scales)
 require(gridExtra)
@@ -116,10 +116,10 @@ it on a square grid with random samples.
 \\
 
 I implemented this exercise in lua script:
-/neuralnet/src/NeuralNet/exercises/module5/trainLattice.lua.
+/neuralnet/src/NeuralNet/exercises/module5/trainLattice.lua and .
 
 Generating input data composed of 100 random points:
-<<EX1_RANDOM_DATA,echo=T,cache=T>>=
+<<EX1_RANDOM_DATA,cache=TRUE,echo=FALSE>>=
 set.seed(123)
 data<-data.frame(X=runif(100,-1,1),Y=runif(100,-1,1))
 @
@@ -419,4 +419,7 @@ ggplot()+
 		scale_colour_discrete(name="Neighborhood\nFunction",
 				labels=c("Gaussian", "Mexican Hat"))
 @
+
+We can see that quantization error is smaller is case of neighborhood
+computed Mexican Hat function.
 \end{document}
