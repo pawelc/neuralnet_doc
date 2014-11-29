@@ -17,6 +17,7 @@
   {}% <before code>
 \renewcommand{\thesection}{}% Remove section references...
 \renewcommand{\thesubsection}{}%... from subsections
+\renewcommand{\thesubsubsection}{}%... from subsections
 
 \title{Module VI: Evolutionary algorithms}
 \author{Pawel Chilinski}
@@ -37,14 +38,468 @@ Examples in this document are implemented in R.
 \subsection{Exercise} Using of any program language, write evolutionary strategies for fitting of function to
 experimental data set. The format of function is a polynomial: $y(x)=ax^2+bx+c$. Find
 parameters: a, b, c.
-Try to implement strategies: (1+1), ($\mi+\lambda$), ($\mi,\lambda$).
+Try to implement strategies: (1+1), ($\mu+\lambda$), ($\mu,\lambda$).
 Find and describe differences in efficiency. Try to find, what is a reason of
 differences in algorithms operating.
 \\
 
-Implementation of (1+1) strategy:
-<<ONE_PLUS_ONE_STRATEGY,cache=TRUE,echo=TRUE>>=
 
+The fitness function in my implementation is RMSE over the empirical data. So
+algorithms try to minimise this fitness. For all evolutionary strategies I am
+using the the threshold of 10 RMSE. So algorithm stops when RMSE of the best
+solution is equal or lower to 10. In this case I can compare algorithms using
+number of generations it took them to reach assumed target.
+
+<<MAX_RMSE,cache=TRUE,echo=TRUE>>=
+MAX_RMSE<-10
 @
+
+Create table with the empirical data:
+
+<<DATA,cache=TRUE,echo=TRUE>>=
+#empirical data
+data <- data.frame(
+		x=c(-10.13,-8.83,-8.02,-7.20,-6.00,-4.99,-4.00,-3.10,-2.00,-1.00,0.00,1.21,2.00,3.00,4.10,
+				4.93,6.01,7.10,8.00,9.11,10.00),
+		y=c(251.23,205.12,143.98,108.32,67.34,44.25,17.93,3.21,-4.89,-8.32,-2.98,7.89,28.54,53.23,
+				82.94,122.98,168.94,224.12,278.32,354.23,414.94))	
+@
+
+
+Functions and data used by all strategies:
+<<COMMON_FUNCTIONS,cache=TRUE,echo=TRUE>>=
+set.seed(123)
+
+#compute individual fitness
+fitness <- function(individual){
+	#for each data point compute inverse of squared difference
+	a<-individual["a"]
+	b<-individual["b"]
+	c<-individual["c"]
+	sqrt(sum(apply(data, 1, function(row){
+						y<-row["y"]
+						x<-row["x"]
+						empY <- a*x^2+b*x+c
+						(y-empY)^2
+					}))/nrow(data))
+}
+
+#computes fitness value for the entire population
+populationFitness<-function(population){
+	#computes fitness for the individual composes of a,b,c genes
+	
+	#for each individual compute its fitness
+	apply(population, 1, function(individual){
+				fitness(individual)	
+			})
+}
+
+#returns function that selects best n individuals from the population
+selectBestFun <- function(n){ 
+		function(population){
+			population[order(population$fitness, decreasing = FALSE)[1:n],]
+		}
+}
+
+#checks if the best individual has better fitness that threshold
+bestFitnessBetterThansStoppingCriterionFun <- function(theshold){ 
+		function(population){
+			population[which.min(population$fitness),"fitness"] <= theshold 
+		}		
+}
+
+applyGeneticOperations <- function(population, context, geneticOperations){
+	temporaryPopulation <- population
+	for(op in geneticOperations){
+		 ret <- op(temporaryPopulation, population, context)
+		 temporaryPopulation <- ret$temporaryPopulation
+		 population <- ret$population
+	}
+	list(temporaryPopulation=temporaryPopulation,population=population)	
+}
+
+
+#Run evolution strategy
+#initialPopulation - initial population
+#createTemporaryPopulationFun - creates temporary population
+#geneticOperations - list of genetic operations to be performed on each population
+#afterGeneticOperationsProcessor - function that receives 2 populations: before genetic operations and 
+#after genetic operations and returns population
+#for which fitenss of each individual is computed and 
+#then selectBestFun is called
+#computeContextAfterGenerationFun - computes context after 
+#selectBestFun - function the select best individuals from population
+#stoppingCriterionFun - function the assesses when we should stop running evolution strategy
+evolutionStrategy <- function(initialPopulation,createTemporaryPopulationFun,geneticOperations,
+		afterGeneticOperationsProcessor,
+		computeContextAfterGenerationFun=function(previousPop,newPopulation){NULL},selectBestFun,
+		stoppingCriterionFun){
+	offspringPopulation <- initialPopulation
+	offspringPopulation$fitness <- populationFitness(offspringPopulation)
+	context<-computeContextAfterGenerationFun(offspringPopulation, offspringPopulation)
+	generation <- 1
+	offspringPopulation$generation <- generation	
+	bestIdx<-order(offspringPopulation$fitness,decreasing = F)[1]
+	history<-data.frame(generation=generation,fitness=offspringPopulation$fitness[bestIdx],
+			a=offspringPopulation$a[bestIdx],
+			b=offspringPopulation$b[bestIdx],
+			c=offspringPopulation$c[bestIdx])
+	while(!stoppingCriterionFun(offspringPopulation)){	
+		temporaryPopulation<-createTemporaryPopulationFun(offspringPopulation)
+		ret<-applyGeneticOperations(temporaryPopulation,context,geneticOperations)		
+		temporaryPopulation <- afterGeneticOperationsProcessor(ret$temporaryPopulation,
+				ret$population)
+		temporaryPopulation$fitness <- populationFitness(temporaryPopulation)				
+		bestPopulation <- selectBestFun(temporaryPopulation)		
+		row.names(bestPopulation) <- NULL
+		generation <- generation + 1
+		bestPopulation$generation <- generation
+		
+		context<-computeContextAfterGenerationFun(offspringPopulation, bestPopulation)
+		
+		offspringPopulation<-bestPopulation
+		
+		bestIdx<-order(offspringPopulation$fitness,decreasing = F)[1]
+		history<-rbind(history,c(generation,offspringPopulation$fitness[bestIdx],
+						a=offspringPopulation$a[bestIdx],
+						b=offspringPopulation$b[bestIdx],
+						c=offspringPopulation$c[bestIdx]))		
+	}	
+	#return the last generation
+	list(solution=offspringPopulation,history=history)
+}
+
+#Generate initial population
+generateInitialPopulation<-function(size,minA,maxA,minB,maxB,minC,maxC) {
+	#population is a data frame (table) which is composed of individuals (as row) and its attributes 
+	#(columns) like genotype chromosme (a,b,c),
+	#deviation chromosome (aDev,bDev,cDev) and fitness value
+	#mutationSuccessRate in the last k generations
+	data.frame(
+			a=runif(size,minA,maxA),
+			b=runif(size,minB,maxB),
+			c=runif(size,minC,maxC),			
+			fitness=NA)
+}
+
+#Plots evolutionary strategy fitted curve for different generations
+plotFittedCurveHistory<-function(evolutionStrategyRes,nPlots=min(20,nrow(evolutionStrategyRes$history))){	
+	step<-nrow(evolutionStrategyRes$history)/nPlots
+	plotList <- vector('list', nPlots)
+	gen<-1
+	for(i in 1:nPlots){	 	
+		
+		#so we always show the last generation
+		if(i==nPlots){
+			gen<-nrow(evolutionStrategyRes$history)
+		}
+		
+		#create function the will show fitted polynomial
+		createTheoreticalFunction<-function(){
+			a<-evolutionStrategyRes$history[ceiling(gen),"a"]
+			b<-evolutionStrategyRes$history[ceiling(gen),"b"]
+			c<-evolutionStrategyRes$history[ceiling(gen),"c"]
+			function(x){						 
+				a*x^2+b*x+c
+			}	 
+		}
+		
+		#constuct plot with empirical points and fitted polynomial
+		plotList[[i]] <- ggplot(data=data) + geom_point(aes(x,y)) + 
+				stat_function(fun = createTheoreticalFunction(),colour="blue") +
+				theme(text = element_text(size=7),axis.text=element_text(size=5),
+						axis.title=element_text(size=8)) +
+				ggtitle(paste("Fitted function in generation:",ceiling(gen)))
+		gen <- gen + step
+	}
+	#plot all graphs
+	do.call("grid.arrange", c(plotList, nrow = 10, ncol = 2))
+}
+@
+
+\subsubsection{(1+1) evolution strategy}
+
+Functions used by (1+1) evolution strategy:
+
+<<ONE_PLUS_ONE_FUNCTIONS,cache=TRUE,echo=TRUE>>=
+#return function performing mutation for the (1+1) evolution strategy 
+#initDev - initial deviation
+#successK - how many previous generations should be considered to compute succcess rate
+mutationFunOnePlusOne <- function(initDev,successK){
+	function(temporaryPopulation,population,context){
+		mutatedPopulation <- temporaryPopulation
+		if(! "dev" %in% colnames(population)){
+			population$dev <- initDev	
+			mutatedPopulation$dev <- initDev
+		}
+		
+		if(! "successRate" %in% colnames(population)){
+			population$successRate <- 0
+			mutatedPopulation$successRate <- 0
+		}
+		
+		for(i in 1:nrow(population)){			
+			mutatedPopulation[i,c("a","b","c")]<-population[i,c("a","b","c")] + 
+					population[i,rep("dev",3)] * rnorm(3)
+			mutatedPopulation$fitness <- fitness(mutatedPopulation[i,c("a","b","c")])
+			
+			#adjusting success rate
+			diff <- population[i,"fitness"] - mutatedPopulation[i,"fitness"] 
+			if(diff > 0) {
+				successRate <- min(1, population[i,"successRate"] + 1/successK)				
+			} else {
+				successRate <- max(0,population[i,"successRate"] - 1/successK)				
+			}
+			population[i,"successRate"]	<- successRate
+			mutatedPopulation[i,"successRate"]	<- successRate
+			
+			#adjust deviation based on success rate
+			sucessRate <- population[i,"successRate"]
+			
+			if(sucessRate < 0.2){
+				newDev <- 0.82 * population[i,"dev"] 	
+			}else if (sucessRate > 0.2){
+				newDev <- 1.2 * population[i,"dev"]
+			}else{
+				newDev <- population[i,"dev"]
+			}
+			population[i,"dev"] <- newDev
+			mutatedPopulation[i,"dev"] <- newDev
+		}
+		list(population=population,temporaryPopulation=mutatedPopulation)	
+	}
+}
+@
+
+Running (1+1) evolution strategy:
+
+<<ONE_PLUS_ONE,cache=TRUE,echo=TRUE,dependson=COMMON_FUNCTIONS;DATA;MAX_RMSE>>=
+onePlusOneRes <- evolutionStrategy(
+		#(1+1) evolution strategy, simply start with population with one individual
+		initialPopulation = generateInitialPopulation(size=1,minA = -100, maxA = 100, minB = -100, 
+				maxB = 100, minC = -100, maxC = 100),	
+		#in case of (1+1) evolution strategy we simply return current population
+		createTemporaryPopulationFun = function(population){population},
+		#for (1+1) using only mutation
+		geneticOperations = c(mutationFunOnePlusOne(initDev = 1, successK = 5)),
+		#we combine individual after mutation with original individual so we can select the best in 
+		#the next step
+		afterGeneticOperationsProcessor = function(temporaryPopulation,offspringPopulation) {
+				rbind(temporaryPopulation, offspringPopulation)
+			},
+		#always select best from the pool of the mutated and old individual
+		selectBestFun = selectBestFun(1),		
+		#stop when the individual has fintess better than	
+		stoppingCriterionFun = bestFitnessBetterThansStoppingCriterionFun(MAX_RMSE))
+@
+
+Parameters of the best solution are:
+
+<<ONE_PLUS_ONE_PARAMS,cache=FALSE,echo=TRUE>>=
+onePlusOneRes$solution
+@
+
+Show history of fitness (MSE) of individuals through generations when looking
+for the best solution using (1+1) evolution strategy:
+
+<<FIG_ONE_PLUS_ONE_FITNESS_HISTORY,fig=TRUE,echo=F,cache=F>>=
+ggplot() + geom_line(aes(generation, fitness),data=onePlusOneRes$history) + scale_y_log10()	+
+		ggtitle("Fitness of the best individual vs generation when using (1+1) evolution strategy") +
+		theme(text = element_text(size=7)) + xlab("Generation") + ylab("MSE")+ 
+		scale_x_discrete(breaks=floor(seq(1,nrow(onePlusOneRes$history),length.out=min(20,nrow(onePlusOneRes$history)))))
+@
+
+Show different functions that were found during finding optimal solution:
+
+<<FIG_ONE_PLUS_ONE_FITTED_FUN,fig=TRUE,echo=F,cache=F,height=26,width=15>>=
+plotFittedCurveHistory(onePlusOneRes)
+@
+
+
+\subsubsection{($\mu+\lambda$) evolution strategy}
+
+Functions used by ($\mu+\lambda$) evolution strategy:
+
+<<MU_PLUS_LAMBDA_FUNCTIONS,cache=TRUE,echo=TRUE>>=
+#return function performing crossover
+#initDev - initial deviation
+muPlusLambdaCrossoverFun <- function(initDev){
+	function(temporaryPopulation,population,context){
+		#fill in if deviations missing
+		if(! "aDev" %in% colnames(temporaryPopulation)){
+			population$aDev <- initDev	
+			temporaryPopulation$aDev <- initDev
+		}
+		if(! "bDev" %in% colnames(temporaryPopulation)){
+			population$bDev <- initDev	
+			temporaryPopulation$bDev <- initDev
+		}
+		if(! "cDev" %in% colnames(temporaryPopulation)){
+			population$cDev <- initDev	
+			temporaryPopulation$cDev <- initDev
+		}
+		
+		popSize <- nrow(temporaryPopulation)
+		shuffleIdx <- sample(popSize,popSize,replace = F)
+		##create crossed over population the same size as temporaryPopulation
+		for(i in seq(1,popSize,2)){
+			parentsIdx<-shuffleIdx[i:(i+1)]
+			parents <- temporaryPopulation[parentsIdx,]
+			alfa<-runif(1)
+			#crossover the parents
+			parents[1,c("a","b","c","aDev","bDev","cDev")]<-
+					alfa*temporaryPopulation[parentsIdx[1],
+							c("a","b","c","aDev","bDev","cDev")]+
+					(1-alfa)*temporaryPopulation[parentsIdx[2],
+							c("a","b","c","aDev","bDev","cDev")]			
+			parents[2,c("a","b","c","aDev","bDev","cDev")]<-
+					alfa*temporaryPopulation[parentsIdx[2],
+							c("a","b","c","aDev","bDev","cDev")]+
+					(1-alfa)*temporaryPopulation[parentsIdx[1],
+							c("a","b","c","aDev","bDev","cDev")]
+			temporaryPopulation[parentsIdx,]<-parents			
+		}		
+		list(population=population,temporaryPopulation=temporaryPopulation)	
+	}
+}
+
+#return function performing mutation
+#crossOverProb - with what probabilty we perform crossover on a given pair
+muPlusLambdaMutationFun <- function(){
+	function(temporaryPopulation,population,context){
+		K<-context[["K"]]
+		mu<-nrow(population)
+		gammaPrime<-K/sqrt(2*sqrt(mu))
+		gamma<-K/sqrt(2*mu)
+		for(i in 1:nrow(temporaryPopulation)){
+			temporaryPopulation[i,c("a","b","c")] <- 
+					temporaryPopulation[i,c("a","b","c")] + 
+					temporaryPopulation[i,c("aDev","bDev","cDev")]*rnorm(3)
+			temporaryPopulation[i,c("aDev","bDev","cDev")] <- 
+					temporaryPopulation[i,c("aDev","bDev","cDev")] * 
+					exp(gammaPrime*rnorm(1)+gamma*rnorm(3)) 	
+		}
+		list(population=population,temporaryPopulation=temporaryPopulation)	
+	}
+}
+@
+
+Run ($\mu+\lambda$) evolution strategy:
+
+<<MU_PLUS_LAMBDA,cache=TRUE,echo=TRUE,dependson=COMMON_FUNCTIONS;DATA;MU_PLUS_LAMBDA_FUNCTIONS;MAX_RMSE>>=
+#number of individulas in the initial population
+mu<-10
+#number of individuals selected to temporary population
+lambda<-20
+muPlusLambdaRes <- evolutionStrategy(
+		#(mu+lambda) evolution strategy, start with population of mu individuals
+		initialPopulation = generateInitialPopulation(size=mu,minA = -100, maxA = 100, minB = -100, 
+				maxB = 100, minC = -100, maxC = 100),
+		#(mu+lambda) evolution strategy, reproduce temporary population to size lambda
+		createTemporaryPopulationFun = function(population){
+			population[sample(1:nrow(population),size=lambda, replace=T),]
+		},
+		#for (mu+lambda) using mutation and crossover
+		geneticOperations = c(muPlusLambdaCrossoverFun(initDev = 1),muPlusLambdaMutationFun()),
+		#we combine temporary and original populations
+		afterGeneticOperationsProcessor = function(temporaryPopulation,offspringPopulation) {
+				rbind(temporaryPopulation, offspringPopulation)
+			},
+		#select mu best individuals from the pool of the modified and original populations
+		selectBestFun = selectBestFun(mu),		
+		#compute number of chromosomes better than the best in the previous generation
+		computeContextAfterGenerationFun=function(previousPop,newPopulation){
+			list("K"=sum(sort(newPopulation$fitness)-sort(previousPop$fitness) < 0))
+		},
+		#stop when the best individual has fintess better than	
+		stoppingCriterionFun = bestFitnessBetterThansStoppingCriterionFun(MAX_RMSE))
+@
+
+Parameters of the best solution are:
+
+<<MU_PLUS_LAMBDA_PARAMS,cache=FALSE,echo=TRUE>>=
+muPlusLambdaRes$solution[order(muPlusLambdaRes$solution$fitness,decreasing = F)[1],]
+@
+
+Show history of fitness (MSE) of individuals through generations when looking
+for the best solution using ($\mu+\lambda$) evolution strategy:
+
+<<FIG_MU_PLUS_LAMBDA_FITNESS_HISTORY,fig=TRUE,echo=F,cache=F>>=
+ggplot() + geom_line(aes(generation, fitness),data=muPlusLambdaRes$history) + scale_y_log10()	+
+		ggtitle("Fitness of the best individual vs generation when using (mu+lambda) evolution strategy") +
+		theme(text = element_text(size=7)) + xlab("Generation") + ylab("MSE")+ 
+		scale_x_discrete(breaks=floor(seq(1,nrow(muPlusLambdaRes$history),length.out=min(20,nrow(muPlusLambdaRes$history)))))
+@
+
+Show different functions that were found during finding optimal solution:
+
+<<FIG_MU_PLUS_LAMBDA_FITTED_FUN,fig=TRUE,echo=F,cache=F,height=26,width=15>>=
+plotFittedCurveHistory(muPlusLambdaRes)
+@
+
+\subsubsection{($\mu,\lambda$) evolution strategy}
+
+Run ($\mu,\lambda$) evolution strategy:
+
+<<MU_AND_LAMBDA,cache=TRUE,echo=TRUE,dependson=COMMON_FUNCTIONS;DATA;MU_PLUS_LAMBDA_FUNCTIONS;MAX_RMSE>>=
+#number of individulas in the initial population
+mu<-10
+#number of individuals selected to temporary population
+lambda<-20
+muAndLambdaRes <- evolutionStrategy(
+		#(mu,lambda) evolution strategy, start with population of mu individuals
+		initialPopulation = generateInitialPopulation(size=mu,minA = -100, maxA = 100, minB = -100, 
+				maxB = 100, minC = -100, maxC = 100),
+		#(mu,lambda) evolution strategy, reproduce temporary population to size lambda
+		createTemporaryPopulationFun = function(population){
+			population[sample(1:nrow(population),size=lambda, replace=T),]
+		},
+		#for (mu,lambda) using mutation and crossover
+		geneticOperations = c(muPlusLambdaCrossoverFun(initDev = 1),muPlusLambdaMutationFun()),
+		#for (mu,lambda) we use only temporaryPopulation
+		afterGeneticOperationsProcessor = function(temporaryPopulation,offspringPopulation) {
+			temporaryPopulation
+			},
+		#select mu best individuals from the pool of the modified population
+		selectBestFun = selectBestFun(mu),		
+		#compute number of chromosomes better than the best in the previous generation
+		computeContextAfterGenerationFun=function(previousPop,newPopulation){
+			list("K"=sum(sort(newPopulation$fitness)-sort(previousPop$fitness) < 0))
+		},
+		#stop when the best individual has fintess better than	
+		stoppingCriterionFun = bestFitnessBetterThansStoppingCriterionFun(MAX_RMSE))
+@
+
+Parameters of the best solution are:
+
+<<MU_AND_LAMBDA_PARAMS,cache=FALSE,echo=TRUE>>=
+muAndLambdaRes$solution[order(muAndLambdaRes$solution$fitness,decreasing = F)[1],]
+@
+
+Show history of fitness (MSE) of individuals through generations when looking
+for the best solution using ($\mu,\lambda$) evolution strategy:
+
+<<FIG_MU_AND_LAMBDA_FITNESS_HISTORY,fig=TRUE,echo=F,cache=F>>=
+ggplot() + geom_line(aes(generation, fitness),data=muAndLambdaRes$history) + scale_y_log10()	+
+		ggtitle("Fitness of the best individual vs generation when using (mu,lambda) evolution strategy") +
+		theme(text = element_text(size=7)) + xlab("Generation") + ylab("MSE") + 
+		scale_x_discrete(breaks=floor(seq(1,nrow(muAndLambdaRes$history),length.out=min(20,nrow(muAndLambdaRes$history)))))
+@
+
+Show different functions that were found during finding optimal solution:
+
+<<FIG_MU_AND_LAMBDA_FITTED_FUN,fig=TRUE,echo=F,cache=F,height=26,width=15>>=
+plotFittedCurveHistory(muAndLambdaRes)
+@
+
+\subsubsection{Summary}
+
+We can see that starting with bigger number of individuals in population we are
+able to converge quicker to satisfactory solution (as was stated in the
+lecture because we are able to start from different places in the search space
+we would explore it more thorougly).
+Also it looks that choosing only from the pool of modified individuals is more beneficial than combining
+previous population with the currently modified one.
+
 \\
 \end{document}
